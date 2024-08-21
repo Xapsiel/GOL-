@@ -6,15 +6,16 @@ import (
 	"time"
 )
 
-type GIL struct {
+type GOL struct {
 	n        int
 	Area     [][]point.Point
+	GameMap  *string
 	finished bool
 }
 
-func NewGIL(n int) *GIL {
+func NewGIL(n int) *GOL {
 	area := generateArea(n)
-	return &GIL{n, area, false}
+	return &GOL{n, area, new(string), false}
 }
 
 func generateArea(n int) [][]point.Point {
@@ -35,52 +36,56 @@ func generateArea(n int) [][]point.Point {
 	return area
 }
 
-func (g *GIL) Run(speed time.Duration) {
-	fmt.Print(g.Print())
+func (g *GOL) Run(speed time.Duration) {
+	g.Print()
+	fmt.Print(g.GameMap)
 
 	for {
-		for x := 1; x < g.n-1; x++ {
-			for y := 1; y < g.n-1; y++ {
-				g.Area[x][y].Check(g.n, g.Area)
-				g.Area[x][y].NewStatus = g.Area[x][y].Status
-				if g.Area[x][y].Status == "dead" && g.Area[x][y].LiveCount == 3 {
-					g.Area[x][y].NewStatus = "live"
-				} else if g.Area[x][y].Status == "live" && !(g.Area[x][y].LiveCount == 2 || g.Area[x][y].LiveCount == 3) {
-					g.Area[x][y].NewStatus = "dead"
-				}
-
-			}
-		}
-		g.commit()
+		g.Print()
 		time.Sleep(speed)
-		fmt.Print(g.Print())
+		fmt.Print(g.GameMap)
 	}
 }
-func (g *GIL) commit() {
+func (g *GOL) Step() {
+	for x := 1; x < g.n-1; x++ {
+		for y := 1; y < g.n-1; y++ {
+			g.Area[x][y].Check(g.n, g.Area)
+			g.Area[x][y].NewStatus = g.Area[x][y].Status
+			if g.Area[x][y].Status == "dead" && g.Area[x][y].LiveCount == 3 {
+				g.Area[x][y].NewStatus = "live"
+			} else if g.Area[x][y].Status == "live" && !(g.Area[x][y].LiveCount == 2 || g.Area[x][y].LiveCount == 3) {
+				g.Area[x][y].NewStatus = "dead"
+			}
+
+		}
+	}
+	g.commit()
+
+}
+func (g *GOL) commit() {
 	for x := 1; x < g.n-1; x++ {
 		for y := 1; y < g.n-1; y++ {
 			g.Area[x][y].Status = g.Area[x][y].NewStatus
 		}
 	}
 }
-func (g *GIL) Print() string {
-	gameMap := ""
+func (g *GOL) Print() {
+	*(g.GameMap) = ""
 	for x := 0; x <= g.n-1; x++ {
 		for y := 0; y <= g.n-1; y++ {
-			if g.Area[x][y].Status == "live" {
-				gameMap += fmt.Sprintf("%c ", rune(9634))
+			if g.Area[x][y].Status == "live" || g.Area[x][y].Status == "busy" {
+				g.Area[x][y].Status = "live"
+				*g.GameMap += fmt.Sprintf("%c ", rune(9634))
 			} else if g.Area[x][y].Status == "dead" {
-				gameMap += fmt.Sprintf("%c ", rune(9635))
+				*g.GameMap += fmt.Sprintf("%c ", rune(9635))
 			} else if g.Area[x][y].Status == "border" {
-				gameMap += fmt.Sprintf("%c ", rune(9673))
+				*g.GameMap += fmt.Sprintf("%c ", rune(9673))
 			} else if g.Area[x][y].Status == "active" {
-				gameMap += fmt.Sprintf("%c ", rune(9668))
-			} else {
-				gameMap += fmt.Sprintf("%c ", rune(9671))
-
+				*g.GameMap += fmt.Sprintf("%c ", rune(9668))
 			}
+
 		}
-		gameMap += "\n"
+		*g.GameMap += "\n"
 	}
-	return fmt.Sprintf("%s", string(gameMap))
+
 }

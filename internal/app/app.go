@@ -4,32 +4,29 @@ import (
 	"crypton/internal/game"
 	"crypton/internal/point"
 	"fmt"
+	"os"
 	"strconv"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/timer"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 var (
-	focusedStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	blurredStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	cursorStyle         = focusedStyle
-	noStyle             = lipgloss.NewStyle()
-	helpStyle           = blurredStyle
-	cursorModeHelpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-
-	focusedButton = focusedStyle.Render("[ Submit ]")
-	blurredButton = fmt.Sprintf("[ %s ]", blurredStyle.Render("Submit"))
+	timeout      = time.Second * 1
+	focusedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 )
 
 type model struct {
-	stage *string
-
+	stage      *string
+	idToS      map[int]string
+	Stoid      map[string]int
 	menu       menu
 	settings   settings
 	playground playground
-	cursor     point.Point
+	play       play
 }
 type menu struct {
 	cursor   int
@@ -39,7 +36,6 @@ type menu struct {
 
 type settings struct {
 	areaN     int
-	arena     [][]point.Point
 	cursor    int
 	choices   []string
 	selected  *int
@@ -49,14 +45,17 @@ type playground struct {
 	choices  [][]point.Point
 	selected map[string]point.Point
 	cursor   point.Point
-	arena    *game.GIL
+	arena    *game.GOL
+	back     []string
+}
+type play struct {
+	ticker *time.Ticker
 }
 
 func InitialModel(n int) model {
 	stage := "menu"
 	playgroundstage := -1
 	t := textinput.New()
-	t.Cursor.Style = cursorStyle
 	t.Placeholder = "Размер арены"
 	t.Focus()
 	t.PromptStyle = focusedStyle
@@ -68,8 +67,8 @@ func InitialModel(n int) model {
 			selected: -1,
 		},
 		settings: settings{
-			areaN:     10,
-			choices:   []string{"Размер арены: ", "Расставить клетки", "start", "Назад"},
+			areaN:     n,
+			choices:   []string{"size", "fill in", "play"},
 			selected:  &playgroundstage,
 			textInput: t,
 		},
@@ -78,28 +77,38 @@ func InitialModel(n int) model {
 			selected: make(map[string]point.Point, 0),
 			cursor:   point.Point{X: 1, Y: 1},
 			arena:    game.NewGIL(10),
+			back:     []string{"back"},
+		},
+		play: play{
+			ticker: time.NewTicker(timeout),
 		},
 	}
 }
 
 func (m model) Init() tea.Cmd {
+	m.play.ticker = time.NewTicker(timeout) // Создание таймера на 100 мс
 	return nil
 }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+
 	switch *(m.settings.selected) {
 	case 0:
 
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch msg.Type {
-			case tea.KeyEnter, tea.KeyCtrlC, tea.KeyEsc:
+			case tea.KeyEnter, tea.KeyCtrlC:
 				m.settings.areaN, _ = strconv.Atoi(m.settings.textInput.Value())
+				m.settings.areaN += 2
 				m.playground.arena = game.NewGIL(m.settings.areaN)
-
+			case tea.KeyBackspace, tea.KeyEsc:
+				*m.stage = "settings"
+				*m.settings.selected = -1
 			}
-			// We handle errors just like any other message
+
 		}
 		m.settings.textInput, _ = m.settings.textInput.Update(msg)
+
 		break
 	case 1:
 		*m.stage = "playground"
@@ -140,21 +149,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "enter", " ":
 				*m.settings.selected = m.settings.cursor
+				if m.settings.choices[m.settings.cursor] == "play" {
+					*m.stage = "play"
+				}
+
 			}
 		}
+
 	case "playground":
+
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			switch msg.String() {
-			case "ctrl+c", "q", "esq":
+			case tea.KeyBackspace.String(), "esq":
+				*m.stage = "settings"
+				*m.settings.selected = -1
+			case "ctrl+c", "q":
 				return m, tea.Quit
 			case "left", "a":
 				if m.playground.cursor.Y > 1 {
 					m.playground.cursor.Y--
 				}
-			case "rigth", "d":
-				if m.playground.cursor.Y < len(m.settings.arena)-1 {
-					*m.stage = strconv.Itoa(m.settings.areaN)
+			case "right", "d":
+				if m.playground.cursor.Y < m.settings.areaN-2 {
 					m.playground.cursor.Y++
 				}
 			case "up", "w":
@@ -166,18 +183,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.playground.cursor.X++
 				}
 			case "enter", " ":
-				if ok := m.playground.arena.Area[m.playground.cursor.X][m.playground.cursor.Y].Status; ok == "dead" {
+				if status := m.playground.arena.Area[m.playground.cursor.X][m.playground.cursor.Y].Status; status == "dead" || status == "active" {
 					m.playground.arena.Area[m.playground.cursor.X][m.playground.cursor.Y].Status = "live"
 					m.playground.selected[fmt.Sprintf("%s-%s", m.playground.cursor.X, m.playground.cursor.Y)] = m.playground.cursor
+
 				} else {
+
 					m.playground.arena.Area[m.playground.cursor.X][m.playground.cursor.Y].Status = "dead"
 					delete(m.playground.selected, fmt.Sprintf("%s-%s", m.playground.cursor.X, m.playground.cursor.Y))
+
 				}
 			}
 
 			return m, nil
 
 		}
+
+	case "play":
+
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "ctrl+c", "q":
+				return m, tea.Quit
+
+			}
+		case timer.TickMsg:
+			m.playground.arena.Step()
+			m.playground.arena.Print()
+
+		}
+
 	}
 	return m, nil
 }
@@ -212,6 +248,7 @@ func (m model) View() string {
 			} else if i == *m.settings.selected {
 				cursor = "x"
 				*m.settings.selected = i
+				*m.stage = m.settings.choices[i]
 			} else {
 				cursor = " "
 			}
@@ -229,22 +266,47 @@ func (m model) View() string {
 					continue
 				}
 				m.playground.arena.Area[x][y].Status = "dead"
-				for _, elem := range m.playground.selected {
-					m.playground.arena.Area[elem.X][elem.Y].Status = "busy"
 
-				}
-				if x == m.playground.cursor.X && y == m.playground.cursor.Y {
+				if x == m.playground.cursor.X && y == m.playground.cursor.Y && m.playground.arena.Area[x][y].Status != "busy" {
 
 					m.playground.arena.Area[x][y].Status = "active"
 				} else {
+					m.playground.arena.Area[x][y].Status = "dead"
+				}
+				for _, elem := range m.playground.selected {
+					m.playground.arena.Area[elem.X][elem.Y].Status = "busy"
 
 				}
 
 			}
 
 		}
-		return m.playground.arena.Print()
+		busyP := "\tPoint\n"
+		for i := range m.playground.selected {
+			busyP += fmt.Sprintf("x=%v;y=%v\n", m.playground.selected[i].X, m.playground.selected[i].Y)
+		}
+		m.playground.arena.Print()
+		return *m.playground.arena.GameMap + "\n" + busyP
+	case "play":
+
+		return s + *m.playground.arena.GameMap
 	}
 
 	return s
+}
+
+func Run(n int) {
+	m := InitialModel(n)
+	p := tea.NewProgram(m)
+
+	go func() {
+		for range m.play.ticker.C { // Отправка сообщений каждые 100 мс
+			p.Send(timer.TickMsg{}) // Отправка сообщения в основной цикл
+		}
+	}()
+
+	if _, err := p.Run(); err != nil {
+		fmt.Println("Ошибка:", err)
+		os.Exit(1)
+	}
 }
